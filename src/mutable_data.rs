@@ -13,16 +13,16 @@ use std::vec::Vec;
 use threshold_crypto::PublicKey;
 
 /// Used to differentiate between conflict-free and conflict aware variants.
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub enum MutableDataKind {
     // Unsequenced, unpublished Mutable Data.
-    Unsequenced { data: BTreeMap<Vec<u8>, Value> },
+    Unsequenced { data: BTreeMap<String, Value> },
     // Sequenced, unpublished Mutable Data.
-    Sequenced { data: BTreeMap<Vec<u8>, Vec<u8>> },
+    Sequenced { data: BTreeMap<String, Vec<u8>> },
 }
 
 /// Permissions given to a user / application for a mutable data field.
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub enum Permission {
     Read,
     Insert,
@@ -32,14 +32,14 @@ pub enum Permission {
 }
 
 /// Mutable data that is unpublished on the network. This data can only be fetch be the owners / those in the permissions fiedls with `Permission::Read` access.
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub struct MutableData {
     /// Network address.
     name: XorName,
     /// Type tag.
     tag: u64,
     /// Key-Value semantics.
-    data: MutableDataKind,
+    pub data: MutableDataKind,
     /// Maps an application key to a list of allowed or forbidden actions.
     permissions: BTreeMap<User, BTreeSet<Permission>>,
     /// Version should be increased for any changes to MutableData fields except for data.
@@ -86,15 +86,15 @@ impl MutableData {
 }
 
 /// A value in `MutableData`
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub struct Value {
     /// Actual data.
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     /// SHALL be incremented sequentially for any change to `data`.
-    version: u64,
+    pub version: u64,
 }
 
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub struct Permissions {
     permissions: BTreeMap<User, BTreeSet<Permission>>,
     /// The current index of the data when this permission change happened.
@@ -104,7 +104,7 @@ pub struct Permissions {
 }
 
 /// Subject of permissions
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
 pub enum User {
     /// Permissions apply to a single public key.
     Key(PublicKey),
