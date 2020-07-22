@@ -8,15 +8,15 @@
 // Software.
 
 use super::metadata::{Address, Entries, Entry, Index, Perm};
-use crate::{Error, PublicKey, Result};
+use crate::{Error, Result};
 pub use crdts::{lseq::Op, Actor};
 use crdts::{
-    lseq::{ident::Identifier, LSeq},
-    CmRDT, VClock,
+    lseq::{ident::Identifier, Entry as LSeqEntry, LSeq},
+    CmRDT,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::Ordering::*,
+    collections::BTreeMap,
     fmt::{self, Display},
     hash::Hash,
 };
@@ -28,7 +28,7 @@ const LSEQ_BOUNDARY: u64 = 1;
 /// thus a large arity be benefitial to keep Identifiers' length short.
 const LSEQ_TREE_BASE: u8 = 10; // arity of 1024 at root
 
-/// CRDT data operation applicable to other Sequence replica.
+/// CRDT Data operation applicable to other Sequence replica.
 #[derive(Clone, Serialize, Deserialize, PartialEq, PartialOrd, Eq, Hash)]
 pub struct CrdtDataOperation<A: Actor + Display + std::fmt::Debug, T> {
     /// Address of a Sequence object on the network.
@@ -36,16 +36,16 @@ pub struct CrdtDataOperation<A: Actor + Display + std::fmt::Debug, T> {
     /// The data operation to apply.
     pub crdt_op: Op<T, A>,
     /// The context (policy) this operation depends on
-    pub ctx: VClock<A>,
+    pub ctx: Identifier<A>,
 }
 
-/// CRDT policy operation applicable to other Sequence replica.
+/// CRDT Policy operation applicable to other Sequence replica.
 #[derive(Clone, Serialize, Deserialize, PartialEq, PartialOrd, Eq, Hash)]
-pub struct CrdtPolicyOperation<A: Actor + Display + std::fmt::Debug, T> {
+pub struct CrdtPolicyOperation<A: Actor + Display + std::fmt::Debug, P> {
     /// Address of a Sequence object on the network.
     pub address: Address,
     /// The policy operation to apply.
-    pub crdt_op: Op<T, A>,
+    pub crdt_op: Op<(P, Option<Identifier<A>>), A>,
     /// The context (data identifier) this operation depends on
     pub ctx: Option<Identifier<A>>,
 }
@@ -59,14 +59,13 @@ where
 {
     /// Address on the network of this piece of data
     address: Address,
-    /// CRDT to store the actual data, i.e. the items of the Sequence
-    data: LSeq<Entry, A>,
-    /// History of the Policy matrix, each entry representing a version of the Policy matrix.
-    policy: LSeq<P, A>,
-    /// Current version of the Policy, it should be greater or equal to all clocks in the Policy
-    /// history. We use this to provide context information to remote replicas when sending
-    /// operations, and replicas can verify they are causally ready before applying them.
-    policy_clock: VClock<A>,
+    /// CRDT to store the actual data, i.e. the items of the Sequence.
+    /// We keep different LSeqs for each Policy, which allows us to create
+    /// a (virtual) branch of items when data ops that depend on old policies are applied.
+    data: BTreeMap<Identifier<A>, LSeq<Entry, A>>,
+    /// History of the Policy matrix, each entry representing a version of the Policy matrix,
+    /// mapping the Identifier of the data's entry when this policy change happened.
+    policy: LSeq<(P, Option<Identifier<A>>), A>,
 }
 
 impl<A, P> Display for SequenceCrdt<A, P>
@@ -76,12 +75,12 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[")?;
-        for (i, entry) in self.data.iter().enumerate() {
+        /*for (i, entry) in self.data.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
             write!(f, "<{}>", String::from_utf8_lossy(&entry),)?;
-        }
+        }*/
         write!(f, "]")
     }
 }
@@ -95,9 +94,8 @@ where
     pub fn new(actor: A, address: Address) -> Self {
         Self {
             address,
-            data: LSeq::new_with_args(actor.clone(), LSEQ_TREE_BASE, LSEQ_BOUNDARY),
+            data: BTreeMap::default(),
             policy: LSeq::new_with_args(actor, LSEQ_TREE_BASE, LSEQ_BOUNDARY),
-            policy_clock: VClock::default(),
         }
     }
 
@@ -106,9 +104,10 @@ where
         &self.address
     }
 
-    /// Returns the last entries index.
-    pub fn entries_index(&self) -> u64 {
-        self.data.len() as u64
+    /// Returns the length of the sequence.
+    pub fn len(&self) -> u64 {
+        let (index, _) = self.walk_entries_main_branch(|_, _| false);
+        index as u64
     }
 
     /// Returns the last policy index.
@@ -118,67 +117,94 @@ where
 
     /// Append a new item to the SequenceCrdt.
     /// Returns the CRDT op and the context it depends on
-    pub fn append(&mut self, entry: Entry) -> CrdtDataOperation<A, Entry> {
-        let crdt_op = self.data.append(entry);
+    pub fn append(&mut self, entry: Entry) -> Result<CrdtDataOperation<A, Entry>> {
+        let cur_policy = self.policy.last_entry().ok_or_else(|| {
+            // There is no Policy set yet
+            Error::InvalidOperation
+        })?;
+
+        // Retrieve the LSeq corresponding to the current Policy,
+        // or create and insert one if not.
+        let policy_id = cur_policy.id.clone();
+        let actor = self.policy.actor();
+        let cur_lseq = self
+            .data
+            .entry(policy_id.clone())
+            .or_insert_with(|| LSeq::new_with_args(actor, LSEQ_TREE_BASE, LSEQ_BOUNDARY));
+
+        // Append the entry to the LSeq corresponding to current Policy
+        let crdt_op = cur_lseq.append(entry);
 
         // We return the operation as it may need to be broadcasted to other replicas
-        CrdtDataOperation {
+        Ok(CrdtDataOperation {
             address: *self.address(),
             crdt_op,
-            ctx: self.policy_clock.clone(),
-        }
+            ctx: policy_id,
+        })
     }
 
     /// Apply a remote data CRDT operation to this replica of the Sequence.
     pub fn apply_data_op(&mut self, op: CrdtDataOperation<A, Entry>) -> Result<()> {
-        println!("APPLY D: REMOTE CONTEXT: {:?}", op.ctx);
-        println!("APPLY D: POLICY CLOCK: {}", self.policy_clock);
+        let policy_id = op.ctx.clone();
+        if self.policy.find(&policy_id).is_some() {
+            // Retrieve the LSeq corresponding to the current Policy,
+            // or create and insert one if not.
+            let actor = self.policy.actor();
+            let lseq = self
+                .data
+                .entry(policy_id)
+                .or_insert_with(|| LSeq::new_with_args(actor, LSEQ_TREE_BASE, LSEQ_BOUNDARY));
 
-        if let Some(Greater) = op.ctx.partial_cmp(&self.policy_clock) {
+            // Apply the CRDT operation to the LSeq data
+            lseq.apply(op.crdt_op);
+            Ok(())
+        } else {
             // Operation is not causally ready as depends on a policy
             // version we aren't aware of yet.
-            // Return error so sender can retry later and/or send the missing policy op
+            // Return error so sender can retry later and/or send the missing policy op/s
+            // TODO: perhaps send the last Policy Identifier as a reference to the sender
             Err(Error::OpNotCausallyReady)
-        } else {
-            // Finally, apply the CRDT operation to the data
-            self.data.apply(op.crdt_op);
-            Ok(())
         }
     }
 
     /// Sets a new Policy keeping the current one in the history.
     pub fn set_policy(&mut self, policy: P) -> CrdtPolicyOperation<A, P> {
-        let crdt_op = self.policy.append(policy);
+        let last_entry_id = self
+            .policy
+            .last_entry()
+            .and_then(|policy| self.data.get(&policy.id))
+            .and_then(|lseq| lseq.last_entry())
+            .map(|entry| entry.id.clone());
 
-        // Let's update the policy global clock as well
-        self.policy_clock.apply(crdt_op.dot().clone());
+        // Append the new Policy to the history
+        let crdt_op = self.policy.append((policy, last_entry_id.clone()));
+        let policy_id = crdt_op.id().clone();
 
-        println!("SET P: LOCAL POLICY CLOCK: {:?}", self.data.last_id());
+        // Create a new LSeq for this new policy
+        let new_lseq = LSeq::new_with_args(self.policy.actor(), LSEQ_TREE_BASE, LSEQ_BOUNDARY);
+        let _ = self.data.insert(policy_id, new_lseq);
 
         // We return the operation as it may need to be broadcasted to other replicas
         CrdtPolicyOperation {
             address: *self.address(),
             crdt_op,
-            ctx: self.data.last_id().cloned(),
+            ctx: last_entry_id,
         }
     }
 
     /// Apply a remote policy CRDT operation to this replica.
     pub fn apply_policy_op(&mut self, op: CrdtPolicyOperation<A, P>) -> Result<()> {
-        let dot = op.crdt_op.dot();
-
-        println!("APPLY P: REMOTE CONTEXT: {}", op.ctx.is_some());
-        if let (Some(id_in_ctx), Some(id)) = (op.ctx, self.data.last_id()) {
-            // Let's check the new policy depends on an item we already have in the sequence
-            if id_in_ctx > *id {
+        /* TODO: verify it's causally ready
+        if let Some(id_in_ctx) = op.ctx {
+            // policy op has a context/causality info,
+            // let's check it's ready for applying
+            if ??? {
                 // The policy is not causally ready, return an error
                 // so the sender can retry later and/or send the missing ops
                 return Err(Error::OpNotCausallyReady);
             }
-        }
+        }*/
 
-        // Let's update also the policy global clock
-        self.policy_clock.apply(dot.clone());
         // Apply the CRDT operation to the local replica of the policy
         self.policy.apply(op.crdt_op);
 
@@ -187,64 +213,94 @@ where
 
     /// Gets the entry at `index` if it exists.
     pub fn get(&self, index: Index) -> Option<&Entry> {
-        let i = to_absolute_index(index, self.entries_index() as usize)?;
-        self.data.get(i)
+        let i = to_absolute_index(index, self.len() as usize)?;
+        let (_, entry) = self.walk_entries_main_branch(|cur_index, _| cur_index == i);
+        entry
     }
 
     /// Gets the last entry.
     pub fn last_entry(&self) -> Option<&Entry> {
-        self.data.last()
+        self.policy
+            .last_entry()
+            .and_then(|policy| self.data.get(&policy.id))
+            .and_then(|lseq| lseq.last())
     }
 
     /// Gets a policy from the history at `index` if it exists.
     pub fn policy(&self, index: impl Into<Index>) -> Option<&P> {
         let index = to_absolute_index(index.into(), self.policy.len())?;
-        self.policy.get(index)
+        self.policy.get(index).map(|(policy, _)| policy)
     }
 
     /// Gets a list of items which are within the given indices.
-    pub fn in_range(&self, start: Index, end: Index) -> Option<Entries> {
-        let start_index = to_absolute_index(start, self.entries_index() as usize)?;
-        let end_index = to_absolute_index(end, self.entries_index() as usize)?;
-
-        let range = self
-            .data
-            .iter()
-            .take(end_index - 1)
-            .enumerate()
-            .filter_map(|(i, entry)| {
-                if i >= start_index {
-                    Some(entry.clone())
-                } else {
-                    None
+    pub fn in_range(&self, _start: Index, _end: Index) -> Option<Entries> {
+        //let start_index = to_absolute_index(start, self.len() as usize)?;
+        //let end_index = to_absolute_index(end, self.len() as usize)?;
+        let entries = Entries::default();
+        /*let _ = self.walk_entries_main_branch(|cur_index, cur_entry| {
+            if cur_index < end_index {
+                if cur_index >= start_index {
+                    entries.push(cur_entry.clone())
                 }
-            })
-            .collect::<Entries>();
+                false
+            } else {
+                true
+            }
+        });*/
 
-        if range.is_empty() {
+        if entries.is_empty() {
             None
         } else {
-            Some(range)
+            Some(entries)
         }
     }
 
-    /// Checks if the requester is the last owner.
-    ///
-    /// Returns:
-    /// `Ok(())` if the requester is the owner,
-    /// `Err::InvalidOwners` if the last owner is invalid,
-    /// `Err::AccessDenied` if the requester is not the owner.
-    pub fn check_is_last_owner(&self, requester: PublicKey) -> Result<()> {
-        let owner = *self
-            .policy(Index::FromEnd(1))
-            .ok_or_else(|| Error::InvalidOwners)?
-            .owner();
+    // Private helper to walk through the main branch of entries
+    // TODO: transform this into an iterator
+    // TODO: support walking through other branches based on a Policy
+    fn walk_entries_main_branch<F>(&self, stop_fn: F) -> (usize, Option<&Entry>)
+    where
+        F: Fn(usize, &Entry) -> bool,
+    {
+        // We walk through the items ignoring branches of items
+        // which were addded concurrently with new policies,
+        // or those who were applied using an old policy as their context
+        let mut cur_index = 0;
+        let mut iter = self.policy.iter_entries().peekable();
+        // Iterate through the history of policies from oldest to newest
+        while let Some(LSeqEntry { id: policy_id, .. }) = iter.next() {
+            // Find out what's the last entry with current Policy
+            // to be considered prt of the main branch by peeking
+            // subsequent Policy's causality info, i.e. linked entry id
+            let ctx = iter.peek().and_then(|p| p.val.1.as_ref());
 
-        if requester == owner {
-            Ok(())
-        } else {
-            Err(Error::AccessDenied)
+            // Retrieve the LSeq of items corresponding to current Policy
+            if let Some(lseq) = self.data.get(policy_id) {
+                // ...iterate through such entries
+                for LSeqEntry {
+                    id: entry_id, val, ..
+                } in lseq.iter_entries()
+                {
+                    // if caller is interested in current index/entry
+                    // we just stop here and return current entry
+                    if stop_fn(cur_index, val) {
+                        return (cur_index, Some(val));
+                    }
+                    cur_index += 1;
+
+                    // If current entry is the last one bafore subsequent Policy
+                    // was applied we then skip the rest of entries, and continue
+                    // with entries corresponding to subsequent Policy
+                    if let Some(id_ctx) = ctx {
+                        if entry_id == id_ctx {
+                            break;
+                        }
+                    }
+                }
+            }
         }
+
+        (cur_index, None)
     }
 }
 
