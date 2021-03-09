@@ -11,28 +11,25 @@ use super::metadata::Entries;
 use super::metadata::{Address, Entry, Index, Perm};
 use crate::Signature;
 use crate::{utils, Error, PublicKey, Result};
-use crdts::{lseq::LSeq, CmRDT};
-pub use crdts::{lseq::Op, Actor};
+pub use crdts::merkle_reg::{Hash as NodeId, Node};
+use crdts::{
+    merkle_reg::{Content, MerkleReg},
+    CmRDT,
+};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     fmt::{self, Debug, Display},
     hash::Hash,
 };
 
-/// Since in most of the cases it will be append operations, having a small
-/// boundary will make the Identifiers' length to be shorter.
-const LSEQ_BOUNDARY: u64 = 1;
-/// Again, we are going to be dealing with append operations most of the time,
-/// thus a large arity be benefitial to keep Identifiers' length short.
-const LSEQ_TREE_BASE: u8 = 10; // arity of 1024 at root
-
 /// CRDT Data operation applicable to other Sequence replica.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CrdtOperation<A: Actor + Display + Serialize, T> {
+pub struct CrdtOperation<T> {
     /// Address of a Sequence object on the network.
     pub address: Address,
     /// The data operation to apply.
-    pub crdt_op: Op<T, A>,
+    pub crdt_op: Node<T>,
     /// The PublicKey of the entity that generated the operation
     pub source: PublicKey,
     /// The signature of source on the crdt_top, required to apply the op
@@ -41,49 +38,43 @@ pub struct CrdtOperation<A: Actor + Display + Serialize, T> {
 
 /// Sequence data type as a CRDT with Access Control
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
-pub struct SequenceCrdt<A, P>
+pub struct SequenceCrdt<P>
 where
-    A: Actor + Display + Serialize,
     P: Perm + Hash + Clone + Serialize,
 {
-    /// Actor of this piece of data
-    pub(crate) actor: A,
     /// Address on the network of this piece of data
     address: Address,
     /// CRDT to store the actual data, i.e. the items of the Sequence.
-    data: LSeq<Entry, A>,
+    data: MerkleReg<Entry>,
     /// The Policy matrix containing ownership and users permissions.
     policy: P,
 }
 
-impl<A, P> Display for SequenceCrdt<A, P>
+impl<P> Display for SequenceCrdt<P>
 where
-    A: Actor + Display + Serialize,
     P: Perm + Hash + Clone + Serialize,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[")?;
-        for (i, entry) in self.data.iter().enumerate() {
+        write!(f, "(")?;
+        for (i, entry) in self.data.read().values().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
             write!(f, "<{}>", String::from_utf8_lossy(&entry),)?;
         }
-        write!(f, "]")
+        write!(f, ")")
     }
 }
 
-impl<A, P> SequenceCrdt<A, P>
+impl<P> SequenceCrdt<P>
 where
-    A: Actor + Display + Serialize,
     P: Perm + Hash + Clone + Serialize,
 {
     /// Constructs a new 'SequenceCrdt'.
-    pub fn new(actor: A, address: Address, policy: P) -> Self {
+    pub fn new(address: Address, policy: P) -> Self {
         Self {
-            actor: actor.clone(),
             address,
-            data: LSeq::new_with_args(actor, LSEQ_TREE_BASE, LSEQ_BOUNDARY),
+            data: MerkleReg::new(),
             policy,
         }
     }
@@ -94,20 +85,24 @@ where
     }
 
     /// Returns the length of the sequence.
+    /// TODO: define the branching criteria for how this length is calculated
     pub fn len(&self) -> u64 {
-        self.data.len() as u64
+        let (_, depth) = self.traverse_reg(None);
+        depth
     }
 
     /// Create crdt op to append a new item to the SequenceCrdt
     pub fn create_append_op(
         &mut self,
         entry: Entry,
+        parents: BTreeSet<NodeId>,
         source: PublicKey,
-    ) -> Result<CrdtOperation<A, Entry>> {
+    ) -> Result<CrdtOperation<Entry>> {
         let address = *self.address();
 
         // Append the entry to the LSeq
-        let crdt_op = self.data.append(entry);
+        let crdt_op = self.data.write(entry, parents);
+        self.data.apply(crdt_op.clone());
 
         // We return the operation as it may need to be broadcasted to other replicas
         Ok(CrdtOperation {
@@ -119,7 +114,7 @@ where
     }
 
     /// Apply a remote data CRDT operation to this replica of the Sequence.
-    pub fn apply_op(&mut self, op: CrdtOperation<A, Entry>) -> Result<()> {
+    pub fn apply_op(&mut self, op: CrdtOperation<Entry>) -> Result<()> {
         // Let's first check the op is validly signed.
         // Note: Perms for the op are checked at the upper Sequence layer.
 
@@ -139,14 +134,20 @@ where
     }
 
     /// Gets the entry at `index` if it exists.
-    pub fn get(&self, index: Index) -> Option<&Entry> {
+    pub fn get(&self, index: Index) -> Option<Entry> {
         let i = to_absolute_index(index, self.len() as usize)?;
-        self.data.get(i)
+        let nodes = self.traverse_reg_rev(i);
+
+        let entry = nodes.values().next().cloned();
+        entry
     }
 
     /// Gets the last entry.
-    pub fn last_entry(&self) -> Option<&Entry> {
-        self.data.last()
+    pub fn last_entry(&self) -> Option<Entry> {
+        // FIXME: if there are multiple branches, resolve which is the
+        // preferred one
+        let entry = self.data.read().values().next().cloned();
+        entry
     }
 
     /// Gets the Policy of the object.
@@ -163,8 +164,9 @@ where
             return None;
         }
         let end_index = to_absolute_index(end, count)?;
-        let items_to_take = end_index - start_index;
+        let _items_to_take = end_index - start_index;
 
+        /*
         let entries = self
             .data
             .iter()
@@ -174,6 +176,56 @@ where
             .collect::<Entries>();
 
         Some(entries)
+        */
+
+        //let (nodes, _) = self.traverse_reg(None);
+        unimplemented!()
+    }
+
+    // Returns the depth of the found content after traversing up the branches.
+    // If no 'stop_at' is provided it will return all entries that are the first
+    // in the sequence which don't have any predecessor.
+    // TODO: make this an iterator
+    fn traverse_reg(&self, stop_at: Option<u64>) -> (Content<Entry>, u64) {
+        let mut content = self.data.read();
+        let mut depth = 0u64;
+        let stop_at = stop_at.unwrap_or(u64::MAX);
+
+        // FIXME: if there are multiple branches,
+        // resolve which is the preferred one
+        while let Some(hash) = content.hashes().iter().next() {
+            content = self.data.parents(*hash);
+            depth += 1;
+
+            // stop at desired depth
+            if depth == stop_at {
+                break;
+            }
+        }
+
+        (content, depth)
+    }
+
+    // Returns the content after traversing the branches in inverse order (from root nodes to leaves).
+    // TODO: make this an iterator
+    fn traverse_reg_rev(&self, _index: usize) -> Content<Entry> {
+        unimplemented!();
+        /*let mut content = self.data.read();
+
+        // FIXME: if there are multiple branches,
+        // resolve which is the preferred one
+        while let Some(hash) = content.hashes().iter().next() {
+            // stop at desired index
+            if let Some(node) = self.data.node(*hash) {
+                if node.height == index {
+                    break;
+                }
+            }
+
+            content = self.data.parents(*hash);
+        }
+
+        content*/
     }
 }
 
