@@ -8,14 +8,14 @@
 // Software.
 
 mod metadata;
-mod seq_crdt;
+mod reg_crdt;
 
 use crate::{Error, PublicKey, Result};
 pub use metadata::{
     Action, Address, Entries, Entry, Index, Kind, Perm, Permissions, Policy, PrivatePermissions,
     PrivatePolicy, PublicPermissions, PublicPolicy, User,
 };
-use seq_crdt::{CrdtOperation, NodeId, RegisterCrdt};
+use reg_crdt::{CrdtOperation, NodeId, RegisterCrdt};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::{
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn register_get_by_index() -> anyhow::Result<()> {
-        let mut replicas = create_public_seq_replicas(1);
+        let mut replicas = create_public_reg_replicas(1);
         let (authority_keypair, register) = &mut replicas[0];
 
         let entry1 = b"value0".to_vec();
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn register_get_in_range() -> anyhow::Result<()> {
-        let mut replicas = create_public_seq_replicas(1);
+        let mut replicas = create_public_reg_replicas(1);
         let (authority_keypair, register) = &mut replicas[0];
 
         let entry1 = b"value0".to_vec();
@@ -517,7 +517,7 @@ mod tests {
         let owner1 = authority_keypair1.public_key();
         let mut perms1 = BTreeMap::default();
         let _ = perms1.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
-        let replica1 = create_public_seq_replica_with(
+        let replica1 = create_public_reg_replica_with(
             Some(authority_keypair1),
             Some(RegisterPublicPolicy {
                 owner: owner1,
@@ -533,7 +533,7 @@ mod tests {
             RegisterUser::Key(owner1),
             RegisterPublicPermissions::new(true),
         );
-        let replica2 = create_public_seq_replica_with(
+        let replica2 = create_public_reg_replica_with(
             Some(authority_keypair2),
             Some(RegisterPublicPolicy {
                 owner: authority2,
@@ -579,7 +579,7 @@ mod tests {
             RegisterPrivatePermissions::new(/*read*/ false, /*append*/ true);
         let _ = perms2.insert(authority1, user_perms2);
 
-        let replica1 = create_private_seq_replica_with(
+        let replica1 = create_private_reg_replica_with(
             Some(authority_keypair1),
             Some(RegisterPrivatePolicy {
                 owner: authority1,
@@ -587,7 +587,7 @@ mod tests {
             }),
         );
 
-        let replica2 = create_private_seq_replica_with(
+        let replica2 = create_private_reg_replica_with(
             Some(authority_keypair2),
             Some(RegisterPrivatePolicy {
                 owner: authority2,
@@ -631,7 +631,7 @@ mod tests {
         let owner1 = authority_keypair1.public_key();
         let mut perms1 = BTreeMap::default();
         let _ = perms1.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
-        let mut replica1 = create_public_seq_replica_with(
+        let mut replica1 = create_public_reg_replica_with(
             Some(authority_keypair1.clone()),
             Some(RegisterPublicPolicy {
                 owner: owner1,
@@ -647,7 +647,7 @@ mod tests {
             RegisterUser::Key(owner1),
             RegisterPublicPermissions::new(false),
         );
-        let mut replica2 = create_public_seq_replica_with(
+        let mut replica2 = create_public_reg_replica_with(
             Some(authority_keypair2.clone()),
             Some(RegisterPublicPolicy {
                 owner: authority2,
@@ -695,7 +695,7 @@ mod tests {
             RegisterPrivatePermissions::new(/*read*/ true, /*append*/ false);
         let _ = perms2.insert(authority1, user_perms2);
 
-        let mut replica1 = create_private_seq_replica_with(
+        let mut replica1 = create_private_reg_replica_with(
             Some(authority_keypair1.clone()),
             Some(RegisterPrivatePolicy {
                 owner: authority1,
@@ -703,7 +703,7 @@ mod tests {
             }),
         );
 
-        let mut replica2 = create_private_seq_replica_with(
+        let mut replica2 = create_private_reg_replica_with(
             Some(authority_keypair2.clone()),
             Some(RegisterPrivatePolicy {
                 owner: authority2,
@@ -844,14 +844,14 @@ mod tests {
         replicas
     }
 
-    fn create_public_seq_replicas(count: usize) -> Vec<(Keypair, Register)> {
+    fn create_public_reg_replicas(count: usize) -> Vec<(Keypair, Register)> {
         let register_name = XorName::random();
         let register_tag = 43_000;
 
         gen_pub_reg_replicas(None, register_name, register_tag, None, count)
     }
 
-    fn create_public_seq_replica_with(
+    fn create_public_reg_replica_with(
         authority_keypair: Option<Keypair>,
         policy: Option<RegisterPublicPolicy>,
     ) -> Register {
@@ -862,7 +862,7 @@ mod tests {
         replicas[0].1.clone()
     }
 
-    fn create_private_seq_replica_with(
+    fn create_private_reg_replica_with(
         authority_keypair: Option<Keypair>,
         policy: Option<RegisterPrivatePolicy>,
     ) -> Register {
@@ -938,13 +938,13 @@ mod tests {
     }
 
     // Generate a Register entry
-    fn generate_seq_entry() -> impl Strategy<Value = Vec<u8>> {
+    fn generate_reg_entry() -> impl Strategy<Value = Vec<u8>> {
         "\\PC*".prop_map(|s| s.into_bytes())
     }
 
     // Generate a vec of Register entries
     fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<Vec<u8>>> {
-        prop::collection::vec(generate_seq_entry(), 1..max_quantity + 1)
+        prop::collection::vec(generate_reg_entry(), 1..max_quantity + 1)
     }
 
     // Generates a vec of Register entries each with a value suggesting
@@ -952,13 +952,13 @@ mod tests {
     fn generate_dataset_and_probability(
         max_quantity: usize,
     ) -> impl Strategy<Value = Vec<(Vec<u8>, u8)>> {
-        prop::collection::vec((generate_seq_entry(), any::<u8>()), 1..max_quantity + 1)
+        prop::collection::vec((generate_reg_entry(), any::<u8>()), 1..max_quantity + 1)
     }
 
     proptest! {
         #[test]
-        fn proptest_seq_doesnt_crash_with_random_data(
-            data in generate_seq_entry()
+        fn proptest_reg_doesnt_crash_with_random_data(
+            data in generate_reg_entry()
         ) {
             // Instantiate the same Register on two replicas
             let register_name = XorName::random();
@@ -987,7 +987,7 @@ mod tests {
         }
 
         #[test]
-        fn proptest_seq_converge_with_many_random_data(
+        fn proptest_reg_converge_with_many_random_data(
             dataset in generate_dataset(1000)
         ) {
             // Instantiate the same Register on two replicas
@@ -1025,7 +1025,7 @@ mod tests {
         }
 
         #[test]
-        fn proptest_seq_converge_with_many_random_data_across_arbitrary_number_of_replicas(
+        fn proptest_reg_converge_with_many_random_data_across_arbitrary_number_of_replicas(
             dataset in generate_dataset(500),
             res in generate_replicas(50)
         ) {

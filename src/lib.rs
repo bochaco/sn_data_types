@@ -32,7 +32,7 @@ mod blob;
 mod errors;
 mod keys;
 mod map;
-mod sequence;
+mod register;
 mod token;
 mod transfer;
 mod utils;
@@ -58,7 +58,7 @@ pub use map::{
 
 pub use token::Token;
 
-pub use sequence::{
+pub use register::{
     Action as RegisterAction, Address as RegisterAddress, Data as Register, DataOp as RegisterOp,
     Entries as RegisterEntries, Entry as RegisterEntry, Index as RegisterIndex,
     Kind as RegisterKind, Permissions as RegisterPermissions, Policy as RegisterPolicy,
