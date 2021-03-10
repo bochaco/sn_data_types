@@ -61,10 +61,11 @@ pub use token::Token;
 pub use register::{
     Action as RegisterAction, Address as RegisterAddress, Data as Register, DataOp as RegisterOp,
     Entries as RegisterEntries, Entry as RegisterEntry, Index as RegisterIndex,
-    Kind as RegisterKind, Permissions as RegisterPermissions, Policy as RegisterPolicy,
-    PrivatePermissions as RegisterPrivatePermissions, PrivatePolicy as RegisterPrivatePolicy,
-    PrivateRegData, PublicPermissions as RegisterPublicPermissions,
-    PublicPolicy as RegisterPublicPolicy, PublicRegData, User as RegisterUser,
+    Kind as RegisterKind, NodeId as RegisterNodeId, Permissions as RegisterPermissions,
+    Policy as RegisterPolicy, PrivatePermissions as RegisterPrivatePermissions,
+    PrivatePolicy as RegisterPrivatePolicy, PrivateRegData,
+    PublicPermissions as RegisterPublicPermissions, PublicPolicy as RegisterPublicPolicy,
+    PublicRegData, User as RegisterUser,
 };
 pub use transfer::*;
 

@@ -15,7 +15,8 @@ pub use metadata::{
     Action, Address, Entries, Entry, Index, Kind, Perm, Permissions, Policy, PrivatePermissions,
     PrivatePolicy, PublicPermissions, PublicPolicy, User,
 };
-use reg_crdt::{CrdtOperation, NodeId, RegisterCrdt};
+pub use reg_crdt::NodeId;
+use reg_crdt::{CrdtOperation, RegisterCrdt};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::{
