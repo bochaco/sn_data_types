@@ -23,10 +23,10 @@ use std::{
     hash::Hash,
 };
 
-/// CRDT Data operation applicable to other Sequence replica.
+/// CRDT Data operation applicable to other Register replica.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CrdtOperation<T> {
-    /// Address of a Sequence object on the network.
+    /// Address of a Register object on the network.
     pub address: Address,
     /// The data operation to apply.
     pub crdt_op: Node<T>,
@@ -36,21 +36,21 @@ pub struct CrdtOperation<T> {
     pub signature: Option<Signature>,
 }
 
-/// Sequence data type as a CRDT with Access Control
+/// Register data type as a CRDT with Access Control
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
-pub struct SequenceCrdt<P>
+pub struct RegisterCrdt<P>
 where
     P: Perm + Hash + Clone + Serialize,
 {
     /// Address on the network of this piece of data
     address: Address,
-    /// CRDT to store the actual data, i.e. the items of the Sequence.
+    /// CRDT to store the actual data, i.e. the items of the Register.
     data: MerkleReg<Entry>,
     /// The Policy matrix containing ownership and users permissions.
     policy: P,
 }
 
-impl<P> Display for SequenceCrdt<P>
+impl<P> Display for RegisterCrdt<P>
 where
     P: Perm + Hash + Clone + Serialize,
 {
@@ -66,11 +66,11 @@ where
     }
 }
 
-impl<P> SequenceCrdt<P>
+impl<P> RegisterCrdt<P>
 where
     P: Perm + Hash + Clone + Serialize,
 {
-    /// Constructs a new 'SequenceCrdt'.
+    /// Constructs a new 'RegisterCrdt'.
     pub fn new(address: Address, policy: P) -> Self {
         Self {
             address,
@@ -84,14 +84,14 @@ where
         &self.address
     }
 
-    /// Returns the length of the sequence.
+    /// Returns the length of the register.
     /// TODO: define the branching criteria for how this length is calculated
     pub fn len(&self) -> u64 {
         let (_, depth) = self.traverse_reg(None);
         depth
     }
 
-    /// Create crdt op to append a new item to the SequenceCrdt
+    /// Create crdt op to append a new item to the RegisterCrdt
     pub fn create_append_op(
         &mut self,
         entry: Entry,
@@ -100,7 +100,6 @@ where
     ) -> Result<CrdtOperation<Entry>> {
         let address = *self.address();
 
-        // Append the entry to the LSeq
         let crdt_op = self.data.write(entry, parents);
         self.data.apply(crdt_op.clone());
 
@@ -113,10 +112,10 @@ where
         })
     }
 
-    /// Apply a remote data CRDT operation to this replica of the Sequence.
+    /// Apply a remote data CRDT operation to this replica of the Register.
     pub fn apply_op(&mut self, op: CrdtOperation<Entry>) -> Result<()> {
         // Let's first check the op is validly signed.
-        // Note: Perms for the op are checked at the upper Sequence layer.
+        // Note: Perms for the op are checked at the upper Register layer.
 
         let sig = op.signature.ok_or(Error::CrdtMissingOpSignature)?;
         let bytes_to_verify = utils::serialise(&op.crdt_op).map_err(|err| {
@@ -127,7 +126,7 @@ where
         })?;
         op.source.verify(&sig, &bytes_to_verify)?;
 
-        // Apply the CRDT operation to the LSeq data
+        // Apply the CRDT operation to the Register
         self.data.apply(op.crdt_op);
 
         Ok(())
@@ -184,7 +183,7 @@ where
 
     // Returns the depth of the found content after traversing up the branches.
     // If no 'stop_at' is provided it will return all entries that are the first
-    // in the sequence which don't have any predecessor.
+    // in the register which don't have any predecessor.
     // TODO: make this an iterator
     fn traverse_reg(&self, stop_at: Option<u64>) -> (Content<Entry>, u64) {
         let mut content = self.data.read();

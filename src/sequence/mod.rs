@@ -15,7 +15,7 @@ pub use metadata::{
     Action, Address, Entries, Entry, Index, Kind, Perm, Permissions, Policy, PrivatePermissions,
     PrivatePolicy, PublicPermissions, PublicPolicy, User,
 };
-use seq_crdt::{CrdtOperation, NodeId, SequenceCrdt};
+use seq_crdt::{CrdtOperation, NodeId, RegisterCrdt};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::{
@@ -24,44 +24,44 @@ use std::{
 };
 use xor_name::XorName;
 
-/// Data mutation operation to apply to Sequence.
+/// Data mutation operation to apply to Register.
 pub type DataOp<T> = CrdtOperation<T>;
 
-/// Public Sequence.
-pub type PublicSeqData = SequenceCrdt<PublicPolicy>;
-/// Private Sequence.
-pub type PrivateSeqData = SequenceCrdt<PrivatePolicy>;
+/// Public Register.
+pub type PublicRegData = RegisterCrdt<PublicPolicy>;
+/// Private Register.
+pub type PrivateRegData = RegisterCrdt<PrivatePolicy>;
 
-impl Debug for PublicSeqData {
+impl Debug for PublicRegData {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "PubSequence {:?}", self.address().name())
+        write!(formatter, "PubRegister {:?}", self.address().name())
     }
 }
 
-impl Debug for PrivateSeqData {
+impl Debug for PrivateRegData {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "PrivSequence {:?}", self.address().name())
+        write!(formatter, "PrivRegister {:?}", self.address().name())
     }
 }
 
-/// Object storing a Sequence variant.
+/// Object storing a Register variant.
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Debug)]
-enum SeqData {
-    /// Public Sequence Data.
-    Public(PublicSeqData),
-    /// Private Sequence Data.
-    Private(PrivateSeqData),
+enum RegData {
+    /// Public Register Data.
+    Public(PublicRegData),
+    /// Private Register Data.
+    Private(PrivateRegData),
 }
 
-/// Object storing the Sequence
+/// Object storing the Register
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Debug)]
 pub struct Data {
     authority: PublicKey,
-    data: SeqData,
+    data: RegData,
 }
 
 impl Data {
-    /// Constructs a new Public Sequence Data.
+    /// Constructs a new Public Register Data.
     /// The 'authority' is assumed to be the PK which the messages were and will be
     /// signed with.
     /// If a policy is not provided, a default policy will be set where
@@ -79,11 +79,11 @@ impl Data {
 
         Self {
             authority,
-            data: SeqData::Public(PublicSeqData::new(Address::Public { name, tag }, policy)),
+            data: RegData::Public(PublicRegData::new(Address::Public { name, tag }, policy)),
         }
     }
 
-    /// Constructs a new Private Sequence Data.
+    /// Constructs a new Private Register Data.
     /// The 'authority' is assumed to be the PK which the messages were and will be
     /// signed with.
     /// If a policy is not provided, a default policy will be set where
@@ -101,15 +101,15 @@ impl Data {
 
         Self {
             authority,
-            data: SeqData::Private(PrivateSeqData::new(Address::Private { name, tag }, policy)),
+            data: RegData::Private(PrivateRegData::new(Address::Private { name, tag }, policy)),
         }
     }
 
     /// Returns the address.
     pub fn address(&self) -> &Address {
         match &self.data {
-            SeqData::Public(data) => data.address(),
-            SeqData::Private(data) => data.address(),
+            RegData::Public(data) => data.address(),
+            RegData::Private(data) => data.address(),
         }
     }
 
@@ -138,18 +138,18 @@ impl Data {
         self.kind().is_private()
     }
 
-    /// Returns the length of the sequence, optionally
+    /// Returns the length of the register, optionally
     /// verifying read permissions if a pk is provided
     pub fn len(&self, requester: Option<PublicKey>) -> Result<u64> {
         self.check_permission(Action::Read, requester)?;
 
         Ok(match &self.data {
-            SeqData::Public(data) => data.len(),
-            SeqData::Private(data) => data.len(),
+            RegData::Public(data) => data.len(),
+            RegData::Private(data) => data.len(),
         })
     }
 
-    /// Returns true if the sequence is empty.
+    /// Returns true if the register is empty.
     pub fn is_empty(&self, requester: Option<PublicKey>) -> Result<bool> {
         self.check_permission(Action::Read, requester)?;
 
@@ -167,8 +167,8 @@ impl Data {
         self.check_permission(Action::Read, requester)?;
 
         let entries = match &self.data {
-            SeqData::Public(data) => data.in_range(start, end),
-            SeqData::Private(data) => data.in_range(start, end),
+            RegData::Public(data) => data.in_range(start, end),
+            RegData::Private(data) => data.in_range(start, end),
         };
 
         Ok(entries)
@@ -179,8 +179,8 @@ impl Data {
         self.check_permission(Action::Read, requester)?;
 
         Ok(match &self.data {
-            SeqData::Public(data) => data.get(index),
-            SeqData::Private(data) => data.get(index),
+            RegData::Public(data) => data.get(index),
+            RegData::Private(data) => data.get(index),
         })
     }
 
@@ -189,8 +189,8 @@ impl Data {
         self.check_permission(Action::Read, requester)?;
 
         Ok(match &self.data {
-            SeqData::Public(data) => data.last_entry(),
-            SeqData::Private(data) => data.last_entry(),
+            RegData::Public(data) => data.last_entry(),
+            RegData::Private(data) => data.last_entry(),
         })
     }
 
@@ -203,8 +203,8 @@ impl Data {
         self.check_permission(Action::Append, None)?;
 
         match &mut self.data {
-            SeqData::Public(data) => data.create_append_op(entry, parents, self.authority),
-            SeqData::Private(data) => data.create_append_op(entry, parents, self.authority),
+            RegData::Public(data) => data.create_append_op(entry, parents, self.authority),
+            RegData::Private(data) => data.create_append_op(entry, parents, self.authority),
         }
     }
 
@@ -213,8 +213,8 @@ impl Data {
         self.check_permission(Action::Append, Some(op.source))?;
 
         match &mut self.data {
-            SeqData::Public(data) => data.apply_op(op),
-            SeqData::Private(data) => data.apply_op(op),
+            RegData::Public(data) => data.apply_op(op),
+            RegData::Private(data) => data.apply_op(op),
         }
     }
 
@@ -223,8 +223,8 @@ impl Data {
         self.check_permission(Action::Read, requester)?;
 
         let user_perm = match &self.data {
-            SeqData::Public(data) => data.policy().permissions(user).ok_or(Error::NoSuchEntry)?,
-            SeqData::Private(data) => data.policy().permissions(user).ok_or(Error::NoSuchEntry)?,
+            RegData::Public(data) => data.policy().permissions(user).ok_or(Error::NoSuchEntry)?,
+            RegData::Private(data) => data.policy().permissions(user).ok_or(Error::NoSuchEntry)?,
         };
 
         Ok(user_perm)
@@ -233,8 +233,8 @@ impl Data {
     /// Returns the public policy, if applicable.
     pub fn public_policy(&self) -> Result<&PublicPolicy> {
         match &self.data {
-            SeqData::Public(data) => Ok(data.policy()),
-            SeqData::Private(_) => Err(Error::InvalidOperation),
+            RegData::Public(data) => Ok(data.policy()),
+            RegData::Private(_) => Err(Error::InvalidOperation),
         }
     }
 
@@ -242,8 +242,8 @@ impl Data {
     pub fn private_policy(&self, requester: Option<PublicKey>) -> Result<&PrivatePolicy> {
         self.check_permission(Action::Read, requester)?;
         match &self.data {
-            SeqData::Private(data) => Ok(data.policy()),
-            SeqData::Public(_) => Err(Error::InvalidOperation),
+            RegData::Private(data) => Ok(data.policy()),
+            RegData::Public(_) => Err(Error::InvalidOperation),
         }
     }
 
@@ -256,16 +256,16 @@ impl Data {
     pub fn check_permission(&self, action: Action, requester: Option<PublicKey>) -> Result<()> {
         let requester = requester.unwrap_or(self.authority);
         match &self.data {
-            SeqData::Public(data) => data.policy().is_action_allowed(requester, action),
-            SeqData::Private(data) => data.policy().is_action_allowed(requester, action),
+            RegData::Public(data) => data.policy().is_action_allowed(requester, action),
+            RegData::Private(data) => data.policy().is_action_allowed(requester, action),
         }
     }
 
     /// Returns the owner of the data.
     pub fn owner(&self) -> PublicKey {
         match &self.data {
-            SeqData::Public(data) => data.policy().owner,
-            SeqData::Private(data) => data.policy().owner,
+            RegData::Public(data) => data.policy().owner,
+            RegData::Private(data) => data.policy().owner,
         }
     }
 
@@ -278,9 +278,10 @@ impl Data {
 #[cfg(test)]
 mod tests {
     use crate::{
-        utils, Error, Keypair, Result, Sequence, SequenceAddress, SequenceEntry, SequenceIndex,
-        SequenceKind, SequenceOp, SequencePermissions, SequencePrivatePermissions,
-        SequencePrivatePolicy, SequencePublicPermissions, SequencePublicPolicy, SequenceUser,
+        utils, Error, Keypair, Register, RegisterAddress, RegisterEntry, RegisterIndex,
+        RegisterKind, RegisterOp, RegisterPermissions, RegisterPrivatePermissions,
+        RegisterPrivatePolicy, RegisterPublicPermissions, RegisterPublicPolicy, RegisterUser,
+        Result,
     };
     use anyhow::anyhow;
     use proptest::prelude::*;
@@ -292,69 +293,69 @@ mod tests {
     use xor_name::XorName;
 
     #[test]
-    fn sequence_create_public() {
-        let sequence_name = XorName::random();
-        let sequence_tag = 43_000;
-        let (_, sequence) = &gen_pub_seq_replicas(None, sequence_name, sequence_tag, None, 1)[0];
+    fn register_create_public() {
+        let register_name = XorName::random();
+        let register_tag = 43_000;
+        let (_, register) = &gen_pub_reg_replicas(None, register_name, register_tag, None, 1)[0];
 
-        assert_eq!(sequence.kind(), SequenceKind::Public);
-        assert_eq!(*sequence.name(), sequence_name);
-        assert_eq!(sequence.tag(), sequence_tag);
-        assert!(sequence.is_public());
-        assert!(!sequence.is_private());
+        assert_eq!(register.kind(), RegisterKind::Public);
+        assert_eq!(*register.name(), register_name);
+        assert_eq!(register.tag(), register_tag);
+        assert!(register.is_public());
+        assert!(!register.is_private());
 
-        let sequence_address =
-            SequenceAddress::from_kind(SequenceKind::Public, sequence_name, sequence_tag);
-        assert_eq!(*sequence.address(), sequence_address);
+        let register_address =
+            RegisterAddress::from_kind(RegisterKind::Public, register_name, register_tag);
+        assert_eq!(*register.address(), register_address);
     }
 
     #[test]
-    fn sequence_create_private() {
-        let sequence_name = XorName::random();
-        let sequence_tag = 43_000;
-        let (_, sequence) = &gen_priv_seq_replicas(None, sequence_name, sequence_tag, None, 1)[0];
+    fn register_create_private() {
+        let register_name = XorName::random();
+        let register_tag = 43_000;
+        let (_, register) = &gen_priv_reg_replicas(None, register_name, register_tag, None, 1)[0];
 
-        assert_eq!(sequence.kind(), SequenceKind::Private);
-        assert_eq!(*sequence.name(), sequence_name);
-        assert_eq!(sequence.tag(), sequence_tag);
-        assert!(!sequence.is_public());
-        assert!(sequence.is_private());
+        assert_eq!(register.kind(), RegisterKind::Private);
+        assert_eq!(*register.name(), register_name);
+        assert_eq!(register.tag(), register_tag);
+        assert!(!register.is_public());
+        assert!(register.is_private());
 
-        let sequence_address =
-            SequenceAddress::from_kind(SequenceKind::Private, sequence_name, sequence_tag);
-        assert_eq!(*sequence.address(), sequence_address);
+        let register_address =
+            RegisterAddress::from_kind(RegisterKind::Private, register_name, register_tag);
+        assert_eq!(*register.address(), register_address);
     }
 
     #[test]
-    fn sequence_concurrent_append_ops() -> Result<()> {
+    fn register_concurrent_append_ops() -> Result<()> {
         let authority_keypair1 = Keypair::new_ed25519(&mut OsRng);
         let authority1 = authority_keypair1.public_key();
         let authority_keypair2 = Keypair::new_ed25519(&mut OsRng);
         let authority2 = authority_keypair2.public_key();
-        let sequence_name: XorName = rand::random();
-        let sequence_tag = 43_000u64;
+        let register_name: XorName = rand::random();
+        let register_tag = 43_000u64;
 
         // We'll have 'authority1' as the owner in both replicas and
         // grant permissions for Append to 'authority2' in both replicas
         let mut perms = BTreeMap::default();
-        let user_perms = SequencePublicPermissions::new(true);
-        let _ = perms.insert(SequenceUser::Key(authority2), user_perms);
+        let user_perms = RegisterPublicPermissions::new(true);
+        let _ = perms.insert(RegisterUser::Key(authority2), user_perms);
 
-        // Instantiate the same Sequence on two replicas with the two diff authorities
-        let mut replica1 = Sequence::new_public(
+        // Instantiate the same Register on two replicas with the two diff authorities
+        let mut replica1 = Register::new_public(
             authority1,
-            sequence_name,
-            sequence_tag,
-            Some(SequencePublicPolicy {
+            register_name,
+            register_tag,
+            Some(RegisterPublicPolicy {
                 owner: authority1,
                 permissions: perms.clone(),
             }),
         );
-        let mut replica2 = Sequence::new_public(
+        let mut replica2 = Register::new_public(
             authority2,
-            sequence_name,
-            sequence_tag,
-            Some(SequencePublicPolicy {
+            register_name,
+            register_tag,
+            Some(RegisterPublicPolicy {
                 owner: authority1,
                 permissions: perms,
             }),
@@ -362,7 +363,7 @@ mod tests {
 
         // And let's append an item to replica1 with autority1
         let item1 = b"item1";
-        let append_op1 = sign_sequence_op(
+        let append_op1 = sign_register_op(
             replica1.create_unsigned_append_op(item1.to_vec(), BTreeSet::new())?,
             &authority_keypair1,
         )?;
@@ -374,7 +375,7 @@ mod tests {
 
         // Concurrently append anoother item with authority2 on replica2
         let item2 = b"item2";
-        let append_op2 = sign_sequence_op(
+        let append_op2 = sign_register_op(
             replica2.create_unsigned_append_op(item2.to_vec(), BTreeSet::new())?,
             &authority_keypair2,
         )?;
@@ -394,131 +395,131 @@ mod tests {
     }
 
     #[test]
-    fn sequence_get_by_index() -> anyhow::Result<()> {
+    fn register_get_by_index() -> anyhow::Result<()> {
         let mut replicas = create_public_seq_replicas(1);
-        let (authority_keypair, sequence) = &mut replicas[0];
+        let (authority_keypair, register) = &mut replicas[0];
 
         let entry1 = b"value0".to_vec();
         let entry2 = b"value1".to_vec();
         let entry3 = b"value2".to_vec();
 
-        let op1 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry1.clone(), BTreeSet::new())?,
+        let op1 = sign_register_op(
+            register.create_unsigned_append_op(entry1.clone(), BTreeSet::new())?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op1.clone())?;
+        register.apply_op(op1.clone())?;
 
-        let op2 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry2.clone(), BTreeSet::new())?,
+        let op2 = sign_register_op(
+            register.create_unsigned_append_op(entry2.clone(), BTreeSet::new())?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op2.clone())?;
+        register.apply_op(op2.clone())?;
 
         let parents = vec![op1.crdt_op.hash(), op2.crdt_op.hash()]
             .iter()
             .map(|hash| hash.clone())
             .collect();
 
-        let op3 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry3.clone(), parents)?,
+        let op3 = sign_register_op(
+            register.create_unsigned_append_op(entry3.clone(), parents)?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op3)?;
+        register.apply_op(op3)?;
 
-        assert_eq!(sequence.len(None)?, 2);
+        assert_eq!(register.len(None)?, 2);
 
-        let index_0 = SequenceIndex::FromStart(0);
-        let first_entry = sequence.get(index_0, None)?;
+        let index_0 = RegisterIndex::FromStart(0);
+        let first_entry = register.get(index_0, None)?;
         assert_eq!(first_entry, Some(entry1));
 
-        let index_1 = SequenceIndex::FromStart(1);
-        let second_entry = sequence.get(index_1, None)?;
+        let index_1 = RegisterIndex::FromStart(1);
+        let second_entry = register.get(index_1, None)?;
         assert_eq!(second_entry, Some(entry3.clone()));
         /*
-                let end_index = SequenceIndex::FromEnd(0);
-                let second_entry = sequence.get(end_index, None)?;
+                let end_index = RegisterIndex::FromEnd(0);
+                let second_entry = register.get(end_index, None)?;
                 assert_eq!(second_entry, Some(entry3));
         */
-        let index_beyond_end = SequenceIndex::FromStart(2);
-        let not_found_entry = sequence.get(index_beyond_end, None)?;
+        let index_beyond_end = RegisterIndex::FromStart(2);
+        let not_found_entry = register.get(index_beyond_end, None)?;
         assert_eq!(not_found_entry, None);
 
         Ok(())
     }
 
     #[test]
-    fn sequence_get_in_range() -> anyhow::Result<()> {
+    fn register_get_in_range() -> anyhow::Result<()> {
         let mut replicas = create_public_seq_replicas(1);
-        let (authority_keypair, sequence) = &mut replicas[0];
+        let (authority_keypair, register) = &mut replicas[0];
 
         let entry1 = b"value0".to_vec();
         let entry2 = b"value1".to_vec();
         let entry3 = b"value2".to_vec();
 
-        let op1 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry1.clone(), BTreeSet::new())?,
+        let op1 = sign_register_op(
+            register.create_unsigned_append_op(entry1.clone(), BTreeSet::new())?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op1)?;
+        register.apply_op(op1)?;
 
-        let op2 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry2.clone(), BTreeSet::new())?,
+        let op2 = sign_register_op(
+            register.create_unsigned_append_op(entry2.clone(), BTreeSet::new())?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op2)?;
+        register.apply_op(op2)?;
 
-        let op3 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry3.clone(), BTreeSet::new())?,
+        let op3 = sign_register_op(
+            register.create_unsigned_append_op(entry3.clone(), BTreeSet::new())?,
             &authority_keypair,
         )?;
-        sequence.apply_op(op3)?;
+        register.apply_op(op3)?;
 
-        assert_eq!(sequence.len(None)?, 3);
+        assert_eq!(register.len(None)?, 3);
 
-        let index_0 = SequenceIndex::FromStart(0);
-        let index_1 = SequenceIndex::FromStart(1);
-        let index_2 = SequenceIndex::FromStart(2);
-        let end_index = SequenceIndex::FromEnd(0);
+        let index_0 = RegisterIndex::FromStart(0);
+        let index_1 = RegisterIndex::FromStart(1);
+        let index_2 = RegisterIndex::FromStart(2);
+        let end_index = RegisterIndex::FromEnd(0);
 
-        let first_entry = sequence.in_range(index_0, index_1, None)?;
+        let first_entry = register.in_range(index_0, index_1, None)?;
         assert_eq!(first_entry, Some(vec![entry1.clone()]));
 
-        let all_entries = sequence.in_range(index_0, end_index, None)?;
+        let all_entries = register.in_range(index_0, end_index, None)?;
         assert_eq!(
             all_entries,
             Some(vec![entry1, entry2.clone(), entry3.clone()])
         );
 
-        let last_entry = sequence.in_range(index_2, end_index, None)?;
+        let last_entry = register.in_range(index_2, end_index, None)?;
         assert_eq!(last_entry, Some(vec![entry3]));
 
-        let second_entry = sequence.in_range(index_1, SequenceIndex::FromEnd(1), None)?;
+        let second_entry = register.in_range(index_1, RegisterIndex::FromEnd(1), None)?;
         assert_eq!(second_entry, Some(vec![entry2]));
 
-        let index_3 = SequenceIndex::FromStart(3);
-        match sequence.in_range(index_3, index_3, None) {
+        let index_3 = RegisterIndex::FromStart(3);
+        match register.in_range(index_3, index_3, None) {
             Ok(None) => Ok(()),
             Ok(Some(entries)) => Err(anyhow!(
-                "Unexpectedly fetched entries from Sequence: {:?}",
+                "Unexpectedly fetched entries from Register: {:?}",
                 entries
             )),
             Err(err) => Err(anyhow!(
-                "Unexpected error thrown when trying to fetch from Sequence with out of bound start index: {:?}",
+                "Unexpected error thrown when trying to fetch from Register with out of bound start index: {:?}",
                 err
             )),
         }
     }
 
     #[test]
-    fn sequence_query_public_policy() -> anyhow::Result<()> {
+    fn register_query_public_policy() -> anyhow::Result<()> {
         // one replica will allow append ops to anyone
         let authority_keypair1 = Keypair::new_ed25519(&mut OsRng);
         let owner1 = authority_keypair1.public_key();
         let mut perms1 = BTreeMap::default();
-        let _ = perms1.insert(SequenceUser::Anyone, SequencePublicPermissions::new(true));
+        let _ = perms1.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
         let replica1 = create_public_seq_replica_with(
             Some(authority_keypair1),
-            Some(SequencePublicPolicy {
+            Some(RegisterPublicPolicy {
                 owner: owner1,
                 permissions: perms1.clone(),
             }),
@@ -529,12 +530,12 @@ mod tests {
         let authority2 = authority_keypair2.public_key();
         let mut perms2 = BTreeMap::default();
         let _ = perms2.insert(
-            SequenceUser::Key(owner1),
-            SequencePublicPermissions::new(true),
+            RegisterUser::Key(owner1),
+            RegisterPublicPermissions::new(true),
         );
         let replica2 = create_public_seq_replica_with(
             Some(authority_keypair2),
-            Some(SequencePublicPolicy {
+            Some(RegisterPublicPolicy {
                 owner: authority2,
                 permissions: perms2.clone(),
             }),
@@ -544,23 +545,23 @@ mod tests {
         assert_eq!(replica1.replica_authority(), owner1);
         assert_eq!(replica1.public_policy()?.permissions, perms1);
         assert_eq!(
-            SequencePermissions::Public(SequencePublicPermissions::new(true)),
-            replica1.permissions(SequenceUser::Anyone, None)?
+            RegisterPermissions::Public(RegisterPublicPermissions::new(true)),
+            replica1.permissions(RegisterUser::Anyone, None)?
         );
 
         assert_eq!(replica2.owner(), authority2);
         assert_eq!(replica2.replica_authority(), authority2);
         assert_eq!(replica2.public_policy()?.permissions, perms2);
         assert_eq!(
-            SequencePermissions::Public(SequencePublicPermissions::new(true)),
-            replica2.permissions(SequenceUser::Key(owner1), None)?
+            RegisterPermissions::Public(RegisterPublicPermissions::new(true)),
+            replica2.permissions(RegisterUser::Key(owner1), None)?
         );
 
         Ok(())
     }
 
     #[test]
-    fn sequence_query_private_policy() -> anyhow::Result<()> {
+    fn register_query_private_policy() -> anyhow::Result<()> {
         let authority_keypair1 = Keypair::new_ed25519(&mut OsRng);
         let authority1 = authority_keypair1.public_key();
         let authority_keypair2 = Keypair::new_ed25519(&mut OsRng);
@@ -568,19 +569,19 @@ mod tests {
 
         let mut perms1 = BTreeMap::default();
         let user_perms1 =
-            SequencePrivatePermissions::new(/*read*/ true, /*append*/ false);
+            RegisterPrivatePermissions::new(/*read*/ true, /*append*/ false);
         let _ = perms1.insert(authority1, user_perms1);
 
         let mut perms2 = BTreeMap::default();
-        let user_perms2 = SequencePrivatePermissions::new(/*read*/ true, /*append*/ true);
+        let user_perms2 = RegisterPrivatePermissions::new(/*read*/ true, /*append*/ true);
         let _ = perms2.insert(authority2, user_perms2);
         let user_perms2 =
-            SequencePrivatePermissions::new(/*read*/ false, /*append*/ true);
+            RegisterPrivatePermissions::new(/*read*/ false, /*append*/ true);
         let _ = perms2.insert(authority1, user_perms2);
 
         let replica1 = create_private_seq_replica_with(
             Some(authority_keypair1),
-            Some(SequencePrivatePolicy {
+            Some(RegisterPrivatePolicy {
                 owner: authority1,
                 permissions: perms1.clone(),
             }),
@@ -588,7 +589,7 @@ mod tests {
 
         let replica2 = create_private_seq_replica_with(
             Some(authority_keypair2),
-            Some(SequencePrivatePolicy {
+            Some(RegisterPrivatePolicy {
                 owner: authority2,
                 permissions: perms2.clone(),
             }),
@@ -601,8 +602,8 @@ mod tests {
             perms1
         );
         assert_eq!(
-            SequencePermissions::Private(SequencePrivatePermissions::new(true, false)),
-            replica1.permissions(SequenceUser::Key(authority1), None)?
+            RegisterPermissions::Private(RegisterPrivatePermissions::new(true, false)),
+            replica1.permissions(RegisterUser::Key(authority1), None)?
         );
 
         assert_eq!(replica2.owner(), authority2);
@@ -612,27 +613,27 @@ mod tests {
             perms2
         );
         assert_eq!(
-            SequencePermissions::Private(SequencePrivatePermissions::new(true, true)),
-            replica2.permissions(SequenceUser::Key(authority2), None)?
+            RegisterPermissions::Private(RegisterPrivatePermissions::new(true, true)),
+            replica2.permissions(RegisterUser::Key(authority2), None)?
         );
         assert_eq!(
-            SequencePermissions::Private(SequencePrivatePermissions::new(false, true)),
-            replica2.permissions(SequenceUser::Key(authority1), None)?
+            RegisterPermissions::Private(RegisterPrivatePermissions::new(false, true)),
+            replica2.permissions(RegisterUser::Key(authority1), None)?
         );
 
         Ok(())
     }
 
     #[test]
-    fn sequence_public_append_fails_when_no_perms_for_authority() -> anyhow::Result<()> {
+    fn register_public_append_fails_when_no_perms_for_authority() -> anyhow::Result<()> {
         // one replica will allow append ops to anyone
         let authority_keypair1 = Keypair::new_ed25519(&mut OsRng);
         let owner1 = authority_keypair1.public_key();
         let mut perms1 = BTreeMap::default();
-        let _ = perms1.insert(SequenceUser::Anyone, SequencePublicPermissions::new(true));
+        let _ = perms1.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
         let mut replica1 = create_public_seq_replica_with(
             Some(authority_keypair1.clone()),
-            Some(SequencePublicPolicy {
+            Some(RegisterPublicPolicy {
                 owner: owner1,
                 permissions: perms1,
             }),
@@ -643,12 +644,12 @@ mod tests {
         let authority2 = authority_keypair2.public_key();
         let mut perms2 = BTreeMap::default();
         let _ = perms2.insert(
-            SequenceUser::Key(owner1),
-            SequencePublicPermissions::new(false),
+            RegisterUser::Key(owner1),
+            RegisterPublicPermissions::new(false),
         );
         let mut replica2 = create_public_seq_replica_with(
             Some(authority_keypair2.clone()),
-            Some(SequencePublicPolicy {
+            Some(RegisterPublicPolicy {
                 owner: authority2,
                 permissions: perms2,
             }),
@@ -657,14 +658,14 @@ mod tests {
         // let's append to both replicas with one first item
         let item1 = b"item1";
         let item2 = b"item2";
-        let append_op1 = sign_sequence_op(
+        let append_op1 = sign_register_op(
             replica1.create_unsigned_append_op(item1.to_vec(), BTreeSet::new())?,
             &authority_keypair1,
         )?;
         replica1.apply_op(append_op1.clone())?;
         check_op_not_allowed_failure(replica2.apply_op(append_op1))?;
 
-        let append_op2 = sign_sequence_op(
+        let append_op2 = sign_register_op(
             replica2.create_unsigned_append_op(item2.to_vec(), BTreeSet::new())?,
             &authority_keypair2,
         )?;
@@ -678,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn sequence_private_append_fails_when_no_perms_for_authority() -> anyhow::Result<()> {
+    fn register_private_append_fails_when_no_perms_for_authority() -> anyhow::Result<()> {
         let authority_keypair1 = Keypair::new_ed25519(&mut OsRng);
         let authority1 = authority_keypair1.public_key();
         let authority_keypair2 = Keypair::new_ed25519(&mut OsRng);
@@ -686,17 +687,17 @@ mod tests {
 
         let mut perms1 = BTreeMap::default();
         let user_perms1 =
-            SequencePrivatePermissions::new(/*read*/ false, /*append*/ true);
+            RegisterPrivatePermissions::new(/*read*/ false, /*append*/ true);
         let _ = perms1.insert(authority2, user_perms1);
 
         let mut perms2 = BTreeMap::default();
         let user_perms2 =
-            SequencePrivatePermissions::new(/*read*/ true, /*append*/ false);
+            RegisterPrivatePermissions::new(/*read*/ true, /*append*/ false);
         let _ = perms2.insert(authority1, user_perms2);
 
         let mut replica1 = create_private_seq_replica_with(
             Some(authority_keypair1.clone()),
-            Some(SequencePrivatePolicy {
+            Some(RegisterPrivatePolicy {
                 owner: authority1,
                 permissions: perms1,
             }),
@@ -704,23 +705,23 @@ mod tests {
 
         let mut replica2 = create_private_seq_replica_with(
             Some(authority_keypair2.clone()),
-            Some(SequencePrivatePolicy {
+            Some(RegisterPrivatePolicy {
                 owner: authority2,
                 permissions: perms2,
             }),
         );
 
-        // let's try to append to both sequences
+        // let's try to append to both registers
         let item1 = b"item1";
         let item2 = b"item2";
-        let append_op1 = sign_sequence_op(
+        let append_op1 = sign_register_op(
             replica1.create_unsigned_append_op(item1.to_vec(), BTreeSet::new())?,
             &authority_keypair1,
         )?;
         replica1.apply_op(append_op1.clone())?;
         check_op_not_allowed_failure(replica2.apply_op(append_op1))?;
 
-        let append_op2 = sign_sequence_op(
+        let append_op2 = sign_register_op(
             replica2.create_unsigned_append_op(item2.to_vec(), BTreeSet::new())?,
             &authority_keypair2,
         )?;
@@ -733,11 +734,11 @@ mod tests {
         // Let's do some read permissions check now...
 
         // let's check authority1 can read from replica1 and replica2
-        let data = replica1.get(SequenceIndex::FromStart(0), Some(authority1))?;
+        let data = replica1.get(RegisterIndex::FromStart(0), Some(authority1))?;
         let last_entry = replica1.last_entry(Some(authority1))?;
         let from_range = replica1.in_range(
-            SequenceIndex::FromStart(0),
-            SequenceIndex::FromStart(1),
+            RegisterIndex::FromStart(0),
+            RegisterIndex::FromStart(1),
             Some(authority1),
         )?;
         // since op2 is concurrent to op1, we don't know exactly
@@ -752,11 +753,11 @@ mod tests {
             assert_eq!(from_range, Some(vec![item2.to_vec()]));
         }
 
-        let data = replica2.get(SequenceIndex::FromStart(0), Some(authority1))?;
+        let data = replica2.get(RegisterIndex::FromStart(0), Some(authority1))?;
         let last_entry = replica2.last_entry(Some(authority1))?;
         let from_range = replica2.in_range(
-            SequenceIndex::FromStart(0),
-            SequenceIndex::FromStart(1),
+            RegisterIndex::FromStart(0),
+            RegisterIndex::FromStart(1),
             Some(authority1),
         )?;
         assert_eq!(data, Some(item2.to_vec()));
@@ -764,20 +765,20 @@ mod tests {
         assert_eq!(from_range, Some(vec![item2.to_vec()]));
 
         // authority2 cannot read from replica1
-        check_op_not_allowed_failure(replica1.get(SequenceIndex::FromStart(0), Some(authority2)))?;
+        check_op_not_allowed_failure(replica1.get(RegisterIndex::FromStart(0), Some(authority2)))?;
         check_op_not_allowed_failure(replica1.last_entry(Some(authority2)))?;
         check_op_not_allowed_failure(replica1.in_range(
-            SequenceIndex::FromStart(0),
-            SequenceIndex::FromStart(1),
+            RegisterIndex::FromStart(0),
+            RegisterIndex::FromStart(1),
             Some(authority2),
         ))?;
 
         // but authority2 can read from replica2
-        let data = replica2.get(SequenceIndex::FromStart(0), Some(authority2))?;
+        let data = replica2.get(RegisterIndex::FromStart(0), Some(authority2))?;
         let last_entry = replica2.last_entry(Some(authority2))?;
         let from_range = replica2.in_range(
-            SequenceIndex::FromStart(0),
-            SequenceIndex::FromStart(1),
+            RegisterIndex::FromStart(0),
+            RegisterIndex::FromStart(1),
             Some(authority2),
         )?;
         assert_eq!(data, Some(item2.to_vec()));
@@ -789,31 +790,31 @@ mod tests {
 
     // Helpers for tests
 
-    fn sign_sequence_op(
-        mut op: SequenceOp<SequenceEntry>,
+    fn sign_register_op(
+        mut op: RegisterOp<RegisterEntry>,
         keypair: &Keypair,
-    ) -> Result<SequenceOp<SequenceEntry>> {
+    ) -> Result<RegisterOp<RegisterEntry>> {
         let bytes = utils::serialise(&op.crdt_op)?;
         let signature = keypair.sign(&bytes);
         op.signature = Some(signature);
         Ok(op)
     }
 
-    fn gen_pub_seq_replicas(
+    fn gen_pub_reg_replicas(
         authority_keypair: Option<Keypair>,
         name: XorName,
         tag: u64,
-        policy: Option<SequencePublicPolicy>,
+        policy: Option<RegisterPublicPolicy>,
         count: usize,
-    ) -> Vec<(Keypair, Sequence)> {
-        let replicas: Vec<(Keypair, Sequence)> = (0..count)
+    ) -> Vec<(Keypair, Register)> {
+        let replicas: Vec<(Keypair, Register)> = (0..count)
             .map(|_| {
                 let authority_keypair = authority_keypair
                     .clone()
                     .unwrap_or_else(|| Keypair::new_ed25519(&mut OsRng));
                 let authority = authority_keypair.public_key();
-                let sequence = Sequence::new_public(authority, name, tag, policy.clone());
-                (authority_keypair, sequence)
+                let register = Register::new_public(authority, name, tag, policy.clone());
+                (authority_keypair, register)
             })
             .collect();
 
@@ -821,21 +822,21 @@ mod tests {
         replicas
     }
 
-    fn gen_priv_seq_replicas(
+    fn gen_priv_reg_replicas(
         authority_keypair: Option<Keypair>,
         name: XorName,
         tag: u64,
-        policy: Option<SequencePrivatePolicy>,
+        policy: Option<RegisterPrivatePolicy>,
         count: usize,
-    ) -> Vec<(Keypair, Sequence)> {
-        let replicas: Vec<(Keypair, Sequence)> = (0..count)
+    ) -> Vec<(Keypair, Register)> {
+        let replicas: Vec<(Keypair, Register)> = (0..count)
             .map(|_| {
                 let authority_keypair = authority_keypair
                     .clone()
                     .unwrap_or_else(|| Keypair::new_ed25519(&mut OsRng));
                 let authority = authority_keypair.public_key();
-                let sequence = Sequence::new_private(authority, name, tag, policy.clone());
-                (authority_keypair, sequence)
+                let register = Register::new_private(authority, name, tag, policy.clone());
+                (authority_keypair, register)
             })
             .collect();
 
@@ -843,32 +844,32 @@ mod tests {
         replicas
     }
 
-    fn create_public_seq_replicas(count: usize) -> Vec<(Keypair, Sequence)> {
-        let sequence_name = XorName::random();
-        let sequence_tag = 43_000;
+    fn create_public_seq_replicas(count: usize) -> Vec<(Keypair, Register)> {
+        let register_name = XorName::random();
+        let register_tag = 43_000;
 
-        gen_pub_seq_replicas(None, sequence_name, sequence_tag, None, count)
+        gen_pub_reg_replicas(None, register_name, register_tag, None, count)
     }
 
     fn create_public_seq_replica_with(
         authority_keypair: Option<Keypair>,
-        policy: Option<SequencePublicPolicy>,
-    ) -> Sequence {
-        let sequence_name = XorName::random();
-        let sequence_tag = 43_000;
+        policy: Option<RegisterPublicPolicy>,
+    ) -> Register {
+        let register_name = XorName::random();
+        let register_tag = 43_000;
         let replicas =
-            gen_pub_seq_replicas(authority_keypair, sequence_name, sequence_tag, policy, 1);
+            gen_pub_reg_replicas(authority_keypair, register_name, register_tag, policy, 1);
         replicas[0].1.clone()
     }
 
     fn create_private_seq_replica_with(
         authority_keypair: Option<Keypair>,
-        policy: Option<SequencePrivatePolicy>,
-    ) -> Sequence {
-        let sequence_name = XorName::random();
-        let sequence_tag = 43_000;
+        policy: Option<RegisterPrivatePolicy>,
+    ) -> Register {
+        let register_name = XorName::random();
+        let register_tag = 43_000;
         let replicas =
-            gen_priv_seq_replicas(authority_keypair, sequence_name, sequence_tag, policy, 1);
+            gen_priv_reg_replicas(authority_keypair, register_name, register_tag, policy, 1);
         replicas[0].1.clone()
     }
 
@@ -888,10 +889,10 @@ mod tests {
     }
 
     // verify data convergence on a set of replicas and with the expected length
-    fn verify_data_convergence(replicas: Vec<Sequence>, expected_len: u64) -> Result<()> {
+    fn verify_data_convergence(replicas: Vec<Register>, expected_len: u64) -> Result<()> {
         // verify replicas have the expected length
         // also verify replicas failed to get with index beyond reported length
-        let index_beyond_end = SequenceIndex::FromStart(expected_len);
+        let index_beyond_end = RegisterIndex::FromStart(expected_len);
         for r in &replicas {
             assert_eq!(r.len(None)?, expected_len);
             assert_eq!(r.get(index_beyond_end, None)?, None);
@@ -899,7 +900,7 @@ mod tests {
 
         // now verify that the items are the same in all replicas
         for i in 0..expected_len {
-            let index = SequenceIndex::FromStart(i);
+            let index = RegisterIndex::FromStart(i);
             let r0_entry = replicas[0].get(index, None)?;
             for r in &replicas {
                 assert_eq!(r0_entry, r.get(index, None)?);
@@ -909,16 +910,16 @@ mod tests {
         Ok(())
     }
 
-    // Generate a vec of Sequence replicas of some length, with corresponding vec of keypairs for signing, and the overall owner of the sequence
+    // Generate a vec of Register replicas of some length, with corresponding vec of keypairs for signing, and the overall owner of the register
     fn generate_replicas(
         max_quantity: usize,
-    ) -> impl Strategy<Value = Result<(Vec<Sequence>, Arc<Keypair>)>> {
+    ) -> impl Strategy<Value = Result<(Vec<Register>, Arc<Keypair>)>> {
         let xorname = XorName::random();
         let tag = 45_000u64;
 
         let owner_keypair = Arc::new(Keypair::new_ed25519(&mut OsRng));
         let owner = owner_keypair.public_key();
-        let policy = SequencePublicPolicy {
+        let policy = RegisterPublicPolicy {
             owner,
             permissions: BTreeMap::default(),
         };
@@ -927,7 +928,7 @@ mod tests {
             let mut replicas = Vec::with_capacity(quantity);
             for _ in 0..quantity {
                 let actor = Keypair::new_ed25519(&mut OsRng).public_key();
-                let replica = Sequence::new_public(actor, xorname, tag, Some(policy.clone()));
+                let replica = Register::new_public(actor, xorname, tag, Some(policy.clone()));
 
                 replicas.push(replica);
             }
@@ -936,17 +937,17 @@ mod tests {
         })
     }
 
-    // Generate a Sequence entry
+    // Generate a Register entry
     fn generate_seq_entry() -> impl Strategy<Value = Vec<u8>> {
         "\\PC*".prop_map(|s| s.into_bytes())
     }
 
-    // Generate a vec of Sequence entries
+    // Generate a vec of Register entries
     fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<Vec<u8>>> {
         prop::collection::vec(generate_seq_entry(), 1..max_quantity + 1)
     }
 
-    // Generates a vec of Sequence entries each with a value suggesting
+    // Generates a vec of Register entries each with a value suggesting
     // the delivery chance of the op that gets created with the entry
     fn generate_dataset_and_probability(
         max_quantity: usize,
@@ -959,26 +960,26 @@ mod tests {
         fn proptest_seq_doesnt_crash_with_random_data(
             data in generate_seq_entry()
         ) {
-            // Instantiate the same Sequence on two replicas
-            let sequence_name = XorName::random();
-            let sequence_tag = 45_000u64;
+            // Instantiate the same Register on two replicas
+            let register_name = XorName::random();
+            let register_tag = 45_000u64;
             let owner_keypair = Keypair::new_ed25519(&mut OsRng);
-            let policy = SequencePublicPolicy {
+            let policy = RegisterPublicPolicy {
                 owner: owner_keypair.public_key(),
                 permissions: BTreeMap::default(),
             };
 
-            let mut replicas = gen_pub_seq_replicas(
+            let mut replicas = gen_pub_reg_replicas(
                 Some(owner_keypair.clone()),
-                sequence_name,
-                sequence_tag,
+                register_name,
+                register_tag,
                 Some(policy),
                 2);
             let (_, mut replica1) = replicas.remove(0);
             let (_, mut replica2) = replicas.remove(0);
 
             // Append an item on replicas
-            let append_op = sign_sequence_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+            let append_op = sign_register_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
             replica1.apply_op(append_op.clone())?;
             replica2.apply_op(append_op)?;
 
@@ -989,20 +990,20 @@ mod tests {
         fn proptest_seq_converge_with_many_random_data(
             dataset in generate_dataset(1000)
         ) {
-            // Instantiate the same Sequence on two replicas
-            let sequence_name = XorName::random();
-            let sequence_tag = 43_001u64;
+            // Instantiate the same Register on two replicas
+            let register_name = XorName::random();
+            let register_tag = 43_001u64;
             let owner_keypair = Keypair::new_ed25519(&mut OsRng);
-            let policy = SequencePublicPolicy {
+            let policy = RegisterPublicPolicy {
                 owner: owner_keypair.public_key(),
                 permissions: BTreeMap::default(),
             };
 
-            // Instantiate the same Sequence on two replicas
-            let mut replicas = gen_pub_seq_replicas(
+            // Instantiate the same Register on two replicas
+            let mut replicas = gen_pub_reg_replicas(
                 Some(owner_keypair.clone()),
-                sequence_name,
-                sequence_tag,
+                register_name,
+                register_tag,
                 Some(policy),
                 2);
             let (_, mut replica1) = replicas.remove(0);
@@ -1013,7 +1014,7 @@ mod tests {
             // insert our data at replicas
             for data in dataset {
                 // Append an item on replica1
-                let append_op = sign_sequence_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                let append_op = sign_register_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
                 replica1.apply_op(append_op.clone())?;
                 // now apply that op to replica 2
                 replica2.apply_op(append_op)?;
@@ -1034,7 +1035,7 @@ mod tests {
             // insert our data at replicas
             for data in dataset {
                 // first generate an op from one replica...
-                let op = sign_sequence_op(replicas[0].create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                let op = sign_register_op(replicas[0].create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
 
                 // then apply this to all replicas
                 for replica in &mut replicas {
@@ -1058,7 +1059,7 @@ mod tests {
             let mut ops = vec![];
 
             for data in dataset {
-                let op = sign_sequence_op(replicas[0].create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                let op = sign_register_op(replicas[0].create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
                 replicas[0].apply_op(op.clone())?;
                 ops.push(op);
             }
@@ -1089,7 +1090,7 @@ mod tests {
             for data in dataset {
                 if let Some(replica) = replicas.choose_mut(&mut OsRng)
                 {
-                    let op = sign_sequence_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                    let op = sign_register_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
                     replica.apply_op(op.clone())?;
 
                     ops.push(op);
@@ -1116,20 +1117,20 @@ mod tests {
         fn proptest_dropped_data_can_be_reapplied_and_we_converge(
             dataset in generate_dataset_and_probability(1000),
         ) {
-            // Instantiate the same Sequence on two replicas
-            let sequence_name = XorName::random();
-            let sequence_tag = 43_001u64;
+            // Instantiate the same Register on two replicas
+            let register_name = XorName::random();
+            let register_tag = 43_001u64;
             let owner_keypair = Keypair::new_ed25519(&mut OsRng);
-            let policy = SequencePublicPolicy {
+            let policy = RegisterPublicPolicy {
                 owner: owner_keypair.public_key(),
                 permissions: BTreeMap::default(),
             };
 
-            // Instantiate the same Sequence on two replicas
-            let mut replicas = gen_pub_seq_replicas(
+            // Instantiate the same Register on two replicas
+            let mut replicas = gen_pub_reg_replicas(
                 Some(owner_keypair.clone()),
-                sequence_name,
-                sequence_tag,
+                register_name,
+                register_tag,
                 Some(policy),
                 2);
             let (_, mut replica1) = replicas.remove(0);
@@ -1139,7 +1140,7 @@ mod tests {
 
             let mut ops = vec![];
             for (data, delivery_chance) in dataset {
-                    let op = sign_sequence_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                    let op = sign_register_op(replica1.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
                     replica1.apply_op(op.clone())?;
 
                     ops.push((op, delivery_chance));
@@ -1181,7 +1182,7 @@ mod tests {
                 let index: usize = OsRng.gen_range( 0, replicas.len());
                 let replica = &mut replicas[index];
 
-                let op = sign_sequence_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                let op = sign_register_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
                 replica.apply_op(op.clone())?;
                 ops.push((op, delivery_chance));
             }
@@ -1226,7 +1227,7 @@ mod tests {
             for data in dataset {
                 if let Some(replica) = replicas.choose_mut(&mut OsRng)
                 {
-                    let op = sign_sequence_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
+                    let op = sign_register_op(replica.create_unsigned_append_op(data, BTreeSet::new())?, &owner_keypair)?;
 
                     replica.apply_op(op.clone())?;
                     ops.push(op);
@@ -1237,11 +1238,11 @@ mod tests {
             let xorname = XorName::random();
             let tag = 45_000u64;
             let random_owner_keypair = Keypair::new_ed25519(&mut OsRng);
-            let mut bogus_replica = Sequence::new_public(random_owner_keypair.public_key(), xorname, tag, None);
+            let mut bogus_replica = Register::new_public(random_owner_keypair.public_key(), xorname, tag, None);
 
             // add bogus ops from bogus replica + bogus data
             for data in bogus_dataset {
-                let bogus_op = sign_sequence_op(bogus_replica.create_unsigned_append_op(data, BTreeSet::new())?, &random_owner_keypair)?;
+                let bogus_op = sign_register_op(bogus_replica.create_unsigned_append_op(data, BTreeSet::new())?, &random_owner_keypair)?;
                 bogus_replica.apply_op(bogus_op.clone())?;
                 ops.push(bogus_op);
             }

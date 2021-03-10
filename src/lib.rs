@@ -59,12 +59,12 @@ pub use map::{
 pub use token::Token;
 
 pub use sequence::{
-    Action as SequenceAction, Address as SequenceAddress, Data as Sequence, DataOp as SequenceOp,
-    Entries as SequenceEntries, Entry as SequenceEntry, Index as SequenceIndex,
-    Kind as SequenceKind, Permissions as SequencePermissions, Policy as SequencePolicy,
-    PrivatePermissions as SequencePrivatePermissions, PrivatePolicy as SequencePrivatePolicy,
-    PrivateSeqData, PublicPermissions as SequencePublicPermissions,
-    PublicPolicy as SequencePublicPolicy, PublicSeqData, User as SequenceUser,
+    Action as RegisterAction, Address as RegisterAddress, Data as Register, DataOp as RegisterOp,
+    Entries as RegisterEntries, Entry as RegisterEntry, Index as RegisterIndex,
+    Kind as RegisterKind, Permissions as RegisterPermissions, Policy as RegisterPolicy,
+    PrivatePermissions as RegisterPrivatePermissions, PrivatePolicy as RegisterPrivatePolicy,
+    PrivateRegData, PublicPermissions as RegisterPublicPermissions,
+    PublicPolicy as RegisterPublicPolicy, PublicRegData, User as RegisterUser,
 };
 pub use transfer::*;
 
@@ -80,8 +80,8 @@ pub enum Data {
     Immutable(Blob),
     /// MutableData.
     Mutable(Map),
-    /// Sequence.
-    Sequence(Sequence),
+    /// Register.
+    Register(Register),
 }
 
 impl Data {
@@ -90,7 +90,7 @@ impl Data {
         match *self {
             Self::Immutable(ref idata) => idata.is_public(),
             Self::Mutable(_) => false,
-            Self::Sequence(ref sequence) => sequence.is_public(),
+            Self::Register(ref register) => register.is_public(),
         }
     }
 
@@ -112,8 +112,8 @@ impl From<Map> for Data {
     }
 }
 
-impl From<Sequence> for Data {
-    fn from(data: Sequence) -> Self {
-        Self::Sequence(data)
+impl From<Register> for Data {
+    fn from(data: Register) -> Self {
+        Self::Register(data)
     }
 }
